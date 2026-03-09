@@ -6,7 +6,7 @@
     <title>比亚迪闪充站 · 全国追踪</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
     <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/echarts@5/map/js/china.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts/map/js/china.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
     <style>
         :root{--bg:#0a0e1a;--card:#111827;--card-h:#1a2236;--bdr:rgba(56,189,248,.12);--bdr-h:rgba(56,189,248,.3);--ac:#38bdf8;--grn:#34d399;--amb:#fbbf24;--pur:#a78bfa;--t1:#f1f5f9;--t2:#94a3b8;--t3:#64748b}
@@ -133,12 +133,9 @@
                     <th data-col="rank">#</th>
                     <th data-col="city">城市</th>
                     <th data-col="station_count">站点数</th>
-                    <th data-col="flash_connectors">闪充桩</th>
-                    <th data-col="fast_connectors">快充桩</th>
-                    <th data-col="slow_connectors">慢充桩</th>
-                    <th data-col="super_connectors">超充桩</th>
+                    <th data-col="flash_connectors">闪充桩数</th>
                 </tr></thead>
-                <tbody id="cityTable"><tr><td colspan="7" class="loading">加载中...</td></tr></tbody>
+                <tbody id="cityTable"><tr><td colspan="4" class="loading">加载中...</td></tr></tbody>
             </table>
             </div>
         </div>
@@ -216,16 +213,38 @@ function renderTypeBreakdown(types){
 
 function renderMap(cities){
     const ch=echarts.init(document.getElementById('chinaMap'));
-    const d=cities.map(c=>({name:c.city,value:c.station_count}));
-    ch.setOption({
-        tooltip:{trigger:'item',formatter:p=>p.name?p.name+'<br/>站点: <b>'+(p.value||0)+'</b>':''},
-        visualMap:{min:0,max:Math.max(...cities.map(c=>c.station_count),50),text:['多','少'],
-            inRange:{color:['#0c1445','#1e40af','#38bdf8','#fbbf24']},textStyle:{color:'#64748b'},left:20,bottom:20},
-        geo:{map:'china',roam:true,itemStyle:{areaColor:'#111827',borderColor:'#1e3a5f'},
-            emphasis:{itemStyle:{areaColor:'#1e3a5f'},label:{color:'#fff'}},label:{show:false}},
-        series:[{type:'map',map:'china',geoIndex:0,data:d}]
+    // Use scatter on geo map - need city coordinates
+    // We'll use the station coordinates from /api/stations instead
+    fetch('/api/stations').then(r=>r.json()).then(stations=>{
+        const points=stations.map(s=>({name:s.station_name,value:[s.lng,s.lat,1]}));
+        // Aggregate by city for tooltip
+        const cityAgg={};
+        for(const c of cities){
+            cityAgg[c.city]=c.station_count;
+        }
+        ch.setOption({
+            tooltip:{trigger:'item',formatter:p=>{
+                if(p.seriesType==='scatter')return p.name+'<br/>站点数: '+p.value[2];
+                return p.name+'<br/>站点: '+(p.value||0);
+            }},
+            geo:{map:'china',roam:true,zoom:1.2,
+                itemStyle:{areaColor:'#111827',borderColor:'#1e3a5f',borderWidth:1},
+                emphasis:{itemStyle:{areaColor:'#1a2744'},label:{show:true,color:'#fff',fontSize:10}}},
+            series:[{
+                type:'scatter',coordinateSystem:'geo',
+                data:points,
+                symbolSize:val=>Math.max(4,Math.min(val[2]*3,20)),
+                itemStyle:{color:'#38bdf8',opacity:.7},
+                emphasis:{itemStyle:{color:'#fbbf24',opacity:1}}
+            }]
+        });
+        window.addEventListener('resize',()=>ch.resize());
+    }).catch(()=>{
+        // Fallback: just show empty map
+        ch.setOption({geo:{map:'china',roam:true,zoom:1.2,
+            itemStyle:{areaColor:'#111827',borderColor:'#1e3a5f'},
+            emphasis:{itemStyle:{areaColor:'#1a2744'}}}});
     });
-    window.addEventListener('resize',()=>ch.resize());
 }
 
 function renderDonut(summary){
@@ -279,8 +298,7 @@ function renderCityTable(cities){
         let rk=i<3?`<span class="rk-t rk${i+1}">${i+1}</span>`:`<span class="rk">${i+1}</span>`;
         return `<tr><td>${rk}</td><td style="font-weight:500">${c.city}</td>
         <td class="nh">${c.station_count}</td>
-        <td>${c.flash_connectors||0}</td><td>${c.fast_connectors||0}</td>
-        <td>${c.slow_connectors||0}</td><td>${c.super_connectors||0}</td></tr>`;
+        <td>${c.flash_connectors||0}</td></tr>`;
     }).join('');
 }
 
