@@ -7,11 +7,10 @@
     <script src="/static/chart.js"></script>
     <script src="/static/echarts.min.js"></script>
     <script src="/static/china.js"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
     <style>
         :root{--bg:#0a0e1a;--card:#111827;--card-h:#1a2236;--bdr:rgba(56,189,248,.12);--bdr-h:rgba(56,189,248,.3);--ac:#38bdf8;--grn:#34d399;--amb:#fbbf24;--pur:#a78bfa;--t1:#f1f5f9;--t2:#94a3b8;--t3:#64748b}
         *{margin:0;padding:0;box-sizing:border-box}
-        body{font-family:'Inter',-apple-system,sans-serif;background:var(--bg);color:var(--t1);min-height:100vh;overflow-x:hidden}
+        body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--t1);min-height:100vh;overflow-x:hidden}
         .header{position:relative;padding:2.5rem 2rem 2rem;text-align:center;background:linear-gradient(180deg,rgba(56,189,248,.06) 0%,transparent 100%);border-bottom:1px solid var(--bdr)}
         .header::before{content:'';position:absolute;top:0;left:50%;transform:translateX(-50%);width:400px;height:2px;background:linear-gradient(90deg,transparent,var(--ac),transparent)}
         .header h1{font-size:1.8rem;font-weight:800;letter-spacing:-.02em;background:linear-gradient(135deg,#38bdf8,#818cf8);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
@@ -72,8 +71,47 @@
         .footer{text-align:center;padding:2rem;margin-top:1rem;border-top:1px solid var(--bdr);color:var(--t3);font-size:.78rem}
         .footer a{color:var(--ac);text-decoration:none}
         .loading{text-align:center;padding:3rem;color:var(--t3)}
-        @media(max-width:1024px){.cards{grid-template-columns:repeat(2,1fr)}.g2,.gmc{grid-template-columns:1fr}.tstrip{grid-template-columns:1fr}}
-        @media(max-width:640px){.cards{grid-template-columns:1fr}.header h1{font-size:1.4rem}.container{padding:1rem}.si{width:100%}.th2{flex-direction:column;align-items:stretch}}
+
+        /* Responsive: Tablet */
+        @media(max-width:1024px){
+            .cards{grid-template-columns:repeat(2,1fr)}
+            .g2,.gmc{grid-template-columns:1fr}
+            .tstrip{grid-template-columns:1fr}
+            .tab-bar{flex-wrap:wrap}
+        }
+        /* Responsive: Mobile */
+        @media(max-width:640px){
+            .cards{grid-template-columns:repeat(2,1fr);gap:.6rem}
+            .card{padding:1rem;border-radius:12px}
+            .card .value{font-size:1.6rem}
+            .card .ci{width:28px;height:28px;font-size:.9rem;margin-bottom:.5rem}
+            .card .label{font-size:.75rem}
+            .card .delta{font-size:.7rem}
+            .header{padding:1.5rem 1rem 1.2rem}
+            .header h1{font-size:1.3rem}
+            .header-sub{font-size:.75rem}
+            .clock-bar{font-size:.7rem;padding:.25rem .8rem}
+            .container{padding:.8rem}
+            .stitle{font-size:.9rem}
+            .tab-bar{gap:.4rem;flex-wrap:wrap}
+            .tab-btn{padding:.4rem .8rem;font-size:.78rem}
+            .tstrip{grid-template-columns:1fr;gap:.6rem}
+            .tchip{padding:.8rem 1rem}
+            .tchip .ti{width:36px;height:36px;font-size:1rem}
+            .tchip .tv{font-size:1.2rem}
+            .g2,.gmc{grid-template-columns:1fr;gap:1rem}
+            .cb{padding:1rem;border-radius:12px}
+            .cb h3{font-size:.85rem}
+            #chinaMap{height:300px!important}
+            #donutChart{height:280px!important}
+            .tb{padding:1rem;border-radius:12px}
+            .th2{flex-direction:column;align-items:stretch;gap:.6rem}
+            .th2 h3{font-size:.9rem}
+            .si{width:100%;font-size:.85rem}
+            th{padding:.4rem .5rem;font-size:.68rem}
+            td{padding:.4rem .5rem;font-size:.8rem}
+            .footer{padding:1.5rem .8rem}
+        }
     </style>
 </head>
 <body>
