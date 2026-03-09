@@ -154,7 +154,6 @@
         <div class="tstrip" id="typeGrid"></div>
         <div class="tab-bar" id="tabBar">
             <button class="tab-btn active" data-type="all">全部站点</button>
-            <button class="tab-btn" data-type="普通站">普通站</button>
             <button class="tab-btn" data-type="高速站">高速站</button>
             <button class="tab-btn" data-type="站中站">站中站</button>
         </div>
@@ -288,40 +287,43 @@ function renderTypeBreakdown(types){
     document.querySelectorAll('#typeGrid .cu').forEach(el=>countUp(el,parseInt(el.dataset.t)||0,800));
 }
 
+let mapChart=null, mapStations=[];
+
 function renderMap(cities){
-    const ch=echarts.init(document.getElementById('chinaMap'));
-    // Use scatter on geo map - need city coordinates
-    // We'll use the station coordinates from /api/stations instead
+    mapChart=echarts.init(document.getElementById('chinaMap'));
     fetch('/api/stations').then(r=>r.json()).then(stations=>{
-        const points=stations.map(s=>({name:s.station_name,value:[s.lng,s.lat,1]}));
-        // Aggregate by city for tooltip
-        const cityAgg={};
-        for(const c of cities){
-            cityAgg[c.city]=c.station_count;
-        }
-        ch.setOption({
-            tooltip:{trigger:'item',formatter:p=>{
-                if(p.seriesType==='scatter')return p.name+'<br/>站点数: '+p.value[2];
-                return p.name+'<br/>站点: '+(p.value||0);
-            }},
-            geo:{map:'china',roam:true,zoom:1.2,
-                itemStyle:{areaColor:'#111827',borderColor:'#1e3a5f',borderWidth:1},
-                emphasis:{itemStyle:{areaColor:'#1a2744'},label:{show:true,color:'#fff',fontSize:10}}},
-            series:[{
-                type:'scatter',coordinateSystem:'geo',
-                data:points,
-                symbolSize:val=>Math.max(4,Math.min(val[2]*3,20)),
-                itemStyle:{color:'#38bdf8',opacity:.7},
-                emphasis:{itemStyle:{color:'#fbbf24',opacity:1}}
-            }]
-        });
-        window.addEventListener('resize',()=>ch.resize());
+        mapStations=stations;
+        updateMap();
     }).catch(()=>{
-        // Fallback: just show empty map
-        ch.setOption({geo:{map:'china',roam:true,zoom:1.2,
+        mapChart.setOption({geo:{map:'china',roam:'move',zoom:1.2,
             itemStyle:{areaColor:'#111827',borderColor:'#1e3a5f'},
             emphasis:{itemStyle:{areaColor:'#1a2744'}}}});
     });
+    window.addEventListener('resize',()=>mapChart&&mapChart.resize());
+}
+
+function updateMap(){
+    if(!mapChart)return;
+    let filtered=mapStations;
+    if(currentType!=='all'){
+        filtered=mapStations.filter(s=>(s.attribute_tags||'').includes(currentType)||(s.station_name||'').includes(currentType));
+    }
+    const points=filtered.map(s=>({name:s.station_name,value:[s.lng,s.lat,1]}));
+    mapChart.setOption({
+        tooltip:{trigger:'item',formatter:p=>p.name||''},
+        geo:{map:'china',roam:'move',zoom:1.2,
+            scaleLimit:{min:1,max:8},
+            itemStyle:{areaColor:'#111827',borderColor:'#1e3a5f',borderWidth:1},
+            regions:[],
+            emphasis:{itemStyle:{areaColor:'#1a2744'},label:{show:true,color:'#fff',fontSize:10}}},
+        series:[{
+            type:'scatter',coordinateSystem:'geo',
+            data:points,
+            symbolSize:6,
+            itemStyle:{color:currentType==='高速站'?'#fbbf24':'#38bdf8',opacity:.8},
+            emphasis:{itemStyle:{color:'#fbbf24',opacity:1,shadowBlur:10}}
+        }]
+    },true);
 }
 
 function renderDonut(summary){
@@ -416,6 +418,7 @@ document.querySelectorAll('.tab-btn').forEach(btn=>{
         btn.classList.add('active');
         currentType=btn.dataset.type;
         sortAndRender();
+        updateMap();
     });
 });
 
