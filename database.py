@@ -156,15 +156,10 @@ def update_daily_summary(conn, today: str):
         "SELECT COUNT(*) as c FROM stations WHERE first_seen = ?", (today,)
     ).fetchone()["c"]
 
-    # Count unique cities (extract from address)
+    # Count unique cities from address field (city name stored directly)
     city_count = conn.execute("""
-        SELECT COUNT(DISTINCT
-            CASE
-                WHEN address LIKE '%市%' THEN SUBSTR(address, 1, INSTR(address, '市'))
-                WHEN address LIKE '%自治州%' THEN SUBSTR(address, 1, INSTR(address, '自治州') + 2)
-                ELSE SUBSTR(address, 1, 6)
-            END
-        ) FROM stations WHERE last_seen = ?
+        SELECT COUNT(DISTINCT address) FROM stations
+        WHERE last_seen = ? AND address IS NOT NULL AND address != ''
     """, (today,)).fetchone()[0]
 
     conn.execute("""
@@ -190,10 +185,7 @@ def get_city_stats(conn, snapshot_date: str = None):
         snapshot_date = date.today().isoformat()
     return conn.execute("""
         SELECT
-            CASE
-                WHEN address LIKE '%市%' THEN SUBSTR(address, 1, INSTR(address, '市'))
-                ELSE SUBSTR(address, 1, 6)
-            END as city,
+            COALESCE(NULLIF(address, ''), '未知') as city,
             COUNT(*) as station_count,
             SUM(flash_charge_num) as flash_connectors,
             SUM(fast_charge_num) as fast_connectors,
