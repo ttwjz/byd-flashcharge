@@ -294,8 +294,10 @@ function renderMap(cities){
 function updateMap(){
     if(!mapChart)return;
     let filtered=mapStations;
-    if(currentType!=='all'){
-        filtered=mapStations.filter(s=>(s.attribute_tags||'').includes(currentType)||(s.station_name||'').includes(currentType));
+    if(currentType==='高速站'){
+        filtered=mapStations.filter(s=>(s.attribute_tags||'').includes('高速'));
+    }else if(currentType==='站中站'){
+        filtered=mapStations.filter(s=>!(s.attribute_tags||'').includes('高速'));
     }
     const points=filtered.map(s=>({name:s.station_name,value:[s.lng,s.lat,1]}));
     mapChart.setOption({
