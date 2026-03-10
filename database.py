@@ -68,6 +68,8 @@ def init_db():
             id INTEGER PRIMARY KEY,
             station_name TEXT,
             address TEXT,
+            province TEXT,
+            city TEXT,
             lat REAL,
             lng REAL,
             operator_name TEXT,
@@ -81,6 +83,7 @@ def init_db():
             byd_self_support INTEGER DEFAULT 0,
             service_tags TEXT,
             attribute_tags TEXT,
+            geocoded INTEGER DEFAULT 0,
             first_seen DATE,
             last_seen DATE
         );
@@ -120,23 +123,22 @@ def init_db():
 
 
 def upsert_station(conn, station: dict, today: str):
-    """Insert or update a station record."""
+    """Insert or update a station record.
+
+    Province/city are filled later by geocode_pending_stations (geocoder.py).
+    New stations get geocoded=0 so the geocoder picks them up.
+    """
     existing = conn.execute("SELECT first_seen FROM stations WHERE id = ?", (station["id"],)).fetchone()
     first_seen = existing["first_seen"] if existing else today
 
-    # Auto-extract city from station name if not already set
-    station_name = station.get("stationName", "")
-    city = extract_city_from_name(station_name)
-
     conn.execute("""
-        INSERT INTO stations (id, station_name, address, city, lat, lng, operator_name, operator_id,
+        INSERT INTO stations (id, station_name, address, lat, lng, operator_name, operator_id,
             operator_station_id, flash_charge_num, fast_charge_num, slow_charge_num, super_charge_num,
             flash_charge, byd_self_support, service_tags, attribute_tags, first_seen, last_seen)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             station_name=excluded.station_name,
             address=excluded.address,
-            city=COALESCE(NULLIF(excluded.city, ''), stations.city),
             lat=excluded.lat,
             lng=excluded.lng,
             flash_charge_num=excluded.flash_charge_num,
@@ -151,7 +153,6 @@ def upsert_station(conn, station: dict, today: str):
         station["id"],
         station.get("stationName", ""),
         station.get("address", ""),
-        city,
         station.get("stationLat", 0),
         station.get("stationLng", 0),
         station.get("operatorName", ""),

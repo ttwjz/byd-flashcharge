@@ -76,7 +76,7 @@ def api_stations():
         today = latest["snapshot_date"] if latest else date.today().isoformat()
 
         stations = conn.execute("""
-            SELECT id, station_name, address, lat, lng,
+            SELECT id, station_name, address, province, city, lat, lng,
                    flash_charge_num, fast_charge_num, slow_charge_num, super_charge_num,
                    service_tags, attribute_tags, first_seen, last_seen
             FROM stations

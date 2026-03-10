@@ -163,13 +163,17 @@
         <div class="cards-top" id="cardsTop">
             <div class="hero" style="opacity:.3;height:180px"></div>
         </div>
-        <div class="tab-bar" id="tabBar">
+        <!-- 站中站/高速站切换暂时隐藏，待高速站数据上线后启用 -->
+        <div class="tab-bar" id="tabBar" style="display:none">
             <button class="tab-btn active" data-type="all">全部站点</button>
             <button class="tab-btn" data-type="站中站">站中站</button>
             <button class="tab-btn" data-type="高速站">高速站</button>
         </div>
         <div class="cb" style="margin-bottom:1.5rem">
-            <h3><span class="di" style="background:var(--ac)"></span> 全国站点分布</h3>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
+                <h3 style="margin-bottom:0"><span class="di" style="background:var(--ac)"></span> <span id="mapTitle">全国站点分布</span></h3>
+                <button id="mapBack" style="display:none;padding:.4rem 1rem;border-radius:8px;border:1px solid var(--bdr);background:rgba(56,189,248,.08);color:var(--ac);cursor:pointer;font-size:.82rem;font-family:inherit;transition:all .2s" onmouseover="this.style.borderColor='rgba(56,189,248,.4)'" onmouseout="this.style.borderColor='var(--bdr)'">← 返回全国</button>
+            </div>
             <div id="chinaMap" style="width:100%;height:460px"></div>
         </div>
         <div class="g2">
@@ -282,45 +286,115 @@ function renderTypeBreakdown(types){
     document.querySelectorAll('#typeGrid .cu').forEach(el=>countUp(el,parseInt(el.dataset.t)||0,800));
 }
 
-let mapChart=null, mapStations=[];
+let mapChart=null, mapStations=[], currentProvince=null, currentCity=null;
+const provinceAdcodeMap={"北京":"110000","天津":"120000","河北":"130000","山西":"140000","内蒙古":"150000","辽宁":"210000","吉林":"220000","黑龙江":"230000","上海":"310000","江苏":"320000","浙江":"330000","安徽":"340000","福建":"350000","江西":"360000","山东":"370000","河南":"410000","湖北":"420000","湖南":"430000","广东":"440000","广西":"450000","海南":"460000","重庆":"500000","四川":"510000","贵州":"520000","云南":"530000","西藏":"540000","陕西":"610000","甘肃":"620000","青海":"630000","宁夏":"640000","新疆":"650000","台湾":"710000","香港":"810000","澳门":"820000","南海诸岛":"100000"};
+const loadedMaps={};
+const cityAdcodeCache={};
+const DATAV_CDN='https://geo.datav.aliyun.com/areas_v3/bound';
 
 function renderMap(cities){
     mapChart=echarts.init(document.getElementById('chinaMap'));
     fetch('./api/stations.json').then(r=>r.json()).then(stations=>{
         mapStations=stations;
-        updateMap();
-    }).catch(()=>{
-        mapChart.setOption({geo:{map:'china',roam:true,zoom:1.2,
-            itemStyle:{areaColor:'#111827',borderColor:'#1e3a5f'},
-            emphasis:{itemStyle:{areaColor:'#1a2744'}}}});
+        showNationalMap();
+    }).catch(()=>showNationalMap());
+
+    mapChart.on('click',function(params){
+        if(params.componentType!=='geo')return;
+        if(!currentProvince){
+            const adcode=provinceAdcodeMap[params.name];
+            if(adcode&&adcode!=='100000') drillToProvince(params.name,adcode);
+        }else if(!currentCity){
+            const cityAc=cityAdcodeCache[params.name];
+            if(cityAc) drillToCity(params.name,cityAc);
+        }
+    });
+
+    document.getElementById('mapBack').addEventListener('click',function(){
+        if(currentCity) drillToProvince(currentProvince,provinceAdcodeMap[currentProvince]);
+        else if(currentProvince) showNationalMap();
     });
     window.addEventListener('resize',()=>mapChart&&mapChart.resize());
 }
 
-function updateMap(){
-    if(!mapChart)return;
-    let filtered=mapStations;
-    if(currentType==='高速站'){
-        filtered=mapStations.filter(s=>(s.attribute_tags||'').includes('高速'));
-    }else if(currentType==='站中站'){
-        filtered=mapStations.filter(s=>!(s.attribute_tags||'').includes('高速'));
-    }
-    const points=filtered.map(s=>({name:s.station_name,value:[s.lng,s.lat,1]}));
+function getFilteredStations(){
+    let f=mapStations;
+    if(currentType==='高速站') f=f.filter(s=>(s.attribute_tags||'').includes('高速'));
+    else if(currentType==='站中站') f=f.filter(s=>!(s.attribute_tags||'').includes('高速'));
+    return f;
+}
+
+function setMapView(mapName,points,symSize,title,backText){
+    document.getElementById('mapTitle').textContent=title;
+    const btn=document.getElementById('mapBack');
+    if(backText){btn.textContent=backText;btn.style.display='inline-block';}
+    else btn.style.display='none';
     mapChart.setOption({
         tooltip:{trigger:'item',formatter:p=>p.name||''},
-        geo:{map:'china',roam:true,zoom:1.2,
-            scaleLimit:{min:1,max:20},
+        geo:{map:mapName,roam:true,zoom:1.2,center:null,
+            scaleLimit:{min:0.8,max:30},
             itemStyle:{areaColor:'#111827',borderColor:'#1e3a5f',borderWidth:1},
             regions:[],
             emphasis:{itemStyle:{areaColor:'#1a2744'},label:{show:true,color:'#fff',fontSize:10}}},
-        series:[{
-            type:'scatter',coordinateSystem:'geo',
-            data:points,
-            symbolSize:2,
-            itemStyle:{color:currentType==='高速站'?'#fbbf24':'#38bdf8',opacity:.6},
-            emphasis:{itemStyle:{color:'#fbbf24',opacity:1,shadowBlur:10}}
-        }]
+        series:[{type:'scatter',coordinateSystem:'geo',data:points,symbolSize:symSize,
+            itemStyle:{color:currentType==='高速站'?'#fbbf24':'#38bdf8',opacity:symSize>3?.85:.6},
+            emphasis:{itemStyle:{color:'#fbbf24',opacity:1,shadowBlur:10}}}]
     },true);
+}
+
+function showNationalMap(){
+    currentProvince=null;currentCity=null;
+    const pts=getFilteredStations().map(s=>({name:s.station_name,value:[s.lng,s.lat,1]}));
+    setMapView('china',pts,2,'全国站点分布',null);
+}
+
+function drillToProvince(name,adcode){
+    function apply(mapName,geoData){
+        currentProvince=name;currentCity=null;
+        if(geoData){
+            (geoData.features||[]).forEach(f=>{
+                const p=f.properties||{};
+                if(p.name&&p.adcode) cityAdcodeCache[p.name]=String(p.adcode);
+            });
+        }
+        const pts=getFilteredStations().filter(s=>(s.province||'').includes(name))
+            .map(s=>({name:s.station_name,value:[s.lng,s.lat,1]}));
+        setMapView(mapName,pts,4,name+' 站点分布','← 返回全国');
+    }
+    const mapName='province_'+adcode;
+    if(loadedMaps[adcode]){apply(mapName,null);return;}
+    fetch('./static/maps/'+adcode+'_full.json').then(r=>r.json()).then(geo=>{
+        echarts.registerMap(mapName,geo);
+        loadedMaps[adcode]=true;
+        apply(mapName,geo);
+    }).catch(e=>console.error('Load province map failed:',e));
+}
+
+function drillToCity(name,adcode){
+    function apply(mapName){
+        currentCity=name;
+        const pts=getFilteredStations().filter(s=>{
+            const c=s.city||'';const p=s.province||'';
+            return c.includes(name)||c.includes(name.replace(/市$/,''));
+        }).map(s=>({name:s.station_name,value:[s.lng,s.lat,1]}));
+        setMapView(mapName,pts,6,currentProvince+' · '+name+' 站点分布','← 返回'+currentProvince);
+    }
+    const mapName='city_'+adcode;
+    if(loadedMaps[adcode]){apply(mapName);return;}
+    fetch(DATAV_CDN+'/'+adcode+'_full.json').then(r=>{
+        if(!r.ok)return fetch(DATAV_CDN+'/'+adcode+'.json');
+        return r;
+    }).then(r=>r.json()).then(geo=>{
+        echarts.registerMap(mapName,geo);
+        loadedMaps[adcode]=true;
+        apply(mapName);
+    }).catch(e=>console.error('Load city map failed:',e));
+}
+
+function updateMap(){
+    if(currentCity){const ac=cityAdcodeCache[currentCity];if(ac)drillToCity(currentCity,ac);}
+    else if(currentProvince){const ac=provinceAdcodeMap[currentProvince];if(ac)drillToProvince(currentProvince,ac);}
+    else showNationalMap();
 }
 
 function renderDonut(summary){

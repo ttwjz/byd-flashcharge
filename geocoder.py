@@ -1,39 +1,48 @@
 """Reverse geocoding module for BYD Flash Charge stations.
 
-Uses Amap (高德地图) reverse geocoding API to determine:
-- Province / City / District
-- Nearby road info (highway vs city road)
-- Station type classification (高速站 / 市区站)
+Dual-backend design:
+  1. Primary: Amap (高德地图) reverse geocoding API - most accurate
+  2. Fallback: Offline Point-in-Polygon using DataV GeoJSON + shapely
 
-Set AMAP_API_KEY in config or environment before use.
+When Amap quota is exhausted (infocode 10003/10004/10044), automatically
+switches to offline PiP for the rest of the run.
+
+Set AMAP_API_KEY in environment before use.
 """
 
+import json
 import os
 import time
-import sqlite3
-import requests
 import logging
+import requests
+from functools import lru_cache
+from shapely.geometry import Point, shape
+from shapely.prepared import prep
 
 log = logging.getLogger(__name__)
 
-# Will be set by user
 AMAP_API_KEY = os.environ.get("AMAP_API_KEY", "")
-
 AMAP_REGEO_URL = "https://restapi.amap.com/v3/geocode/regeo"
+MAPS_DIR = os.path.join(os.path.dirname(__file__), "public", "static", "maps")
+
+_amap_exhausted = False
 
 
-def reverse_geocode(lat: float, lng: float) -> dict:
-    """Call Amap reverse geocoding API for a single coordinate.
+# ---------------------------------------------------------------------------
+# Backend 1: Amap API
+# ---------------------------------------------------------------------------
 
-    Returns dict with: province, city, district, road_name, road_type, formatted_address
-    """
-    if not AMAP_API_KEY:
-        raise ValueError("AMAP_API_KEY not set. Set it in environment or config.")
+def _amap_geocode(lat: float, lng: float) -> dict:
+    """Call Amap reverse geocoding API. Returns {province, city} or {} on failure."""
+    global _amap_exhausted
+
+    if not AMAP_API_KEY or _amap_exhausted:
+        return {}
 
     params = {
         "key": AMAP_API_KEY,
-        "location": f"{lng},{lat}",  # Amap uses lng,lat order
-        "extensions": "all",
+        "location": f"{lng},{lat}",
+        "extensions": "base",
         "output": "json",
     }
 
@@ -42,137 +51,195 @@ def reverse_geocode(lat: float, lng: float) -> dict:
         resp.raise_for_status()
         data = resp.json()
 
-        if data.get("status") != "1":
-            log.warning(f"Amap API error: {data.get('info')}")
+        infocode = data.get("infocode", "")
+        if infocode in ("10003", "10004", "10044"):
+            log.warning(f"Amap quota exhausted (infocode={infocode}), switching to offline PiP")
+            _amap_exhausted = True
             return {}
 
-        regeo = data.get("regeocode", {})
-        addr_comp = regeo.get("addressComponent", {})
+        if data.get("status") != "1":
+            log.warning(f"Amap API error: {data.get('info')} (infocode={infocode})")
+            return {}
 
-        # Extract road info
-        roads = regeo.get("roads", [])
-        nearest_road = roads[0] if roads else {}
+        addr = data.get("regeocode", {}).get("addressComponent", {})
+        province = addr.get("province", "")
+        city = addr.get("city", "")
 
-        # Determine road type
-        road_name = nearest_road.get("name", "")
-        road_type = nearest_road.get("type", "")
-        road_distance = float(nearest_road.get("distance", 9999))
+        if isinstance(province, list):
+            province = ""
+        if isinstance(city, list):
+            city = province
 
-        return {
-            "province": addr_comp.get("province", ""),
-            "city": addr_comp.get("city", "") or addr_comp.get("province", ""),
-            "district": addr_comp.get("district", ""),
-            "road_name": road_name,
-            "road_type": road_type,
-            "road_distance": road_distance,
-            "formatted_address": regeo.get("formatted_address", ""),
-        }
+        return {"province": province, "city": city or province}
 
     except Exception as e:
-        log.error(f"Reverse geocode failed for ({lat}, {lng}): {e}")
+        log.error(f"Amap request failed at ({lat}, {lng}): {e}")
         return {}
 
 
-def classify_station_type(geocode_result: dict, station_name: str = "") -> str:
-    """Classify station as 高速站 / 市区站 / 站中站 based on geocoding + name.
+# ---------------------------------------------------------------------------
+# Backend 2: Offline Point-in-Polygon
+# ---------------------------------------------------------------------------
 
-    Rules:
-    1. Station name contains highway keywords → 高速站
-    2. Nearby road type indicates highway (高速/快速/国道) → 高速站
-    3. Station name contains 站中站 → 站中站
-    4. Otherwise → 市区站
+@lru_cache(maxsize=1)
+def _load_national_polygons():
+    """Load national GeoJSON and build prepared polygons for province lookup."""
+    path = os.path.join(MAPS_DIR, "100000_full.json")
+    if not os.path.exists(path):
+        log.error(f"National GeoJSON not found: {path}")
+        return []
+
+    with open(path, encoding="utf-8") as f:
+        geo = json.load(f)
+
+    polygons = []
+    for feature in geo.get("features", []):
+        name = feature.get("properties", {}).get("name", "")
+        adcode = str(feature.get("properties", {}).get("adcode", ""))
+        try:
+            geom = shape(feature["geometry"])
+            polygons.append((name, adcode, prep(geom), geom))
+        except Exception:
+            continue
+
+    log.info(f"Loaded national PiP data: {len(polygons)} provinces")
+    return polygons
+
+
+@lru_cache(maxsize=40)
+def _load_province_polygons(adcode: str):
+    """Load a province's GeoJSON and build prepared polygons for city lookup."""
+    path = os.path.join(MAPS_DIR, f"{adcode}_full.json")
+    if not os.path.exists(path):
+        return []
+
+    with open(path, encoding="utf-8") as f:
+        geo = json.load(f)
+
+    polygons = []
+    for feature in geo.get("features", []):
+        name = feature.get("properties", {}).get("name", "")
+        try:
+            geom = shape(feature["geometry"])
+            polygons.append((name, prep(geom)))
+        except Exception:
+            continue
+
+    return polygons
+
+
+def _pip_geocode(lat: float, lng: float) -> dict:
+    """Offline point-in-polygon geocoding using DataV GeoJSON + shapely."""
+    point = Point(lng, lat)
+
+    national = _load_national_polygons()
+    if not national:
+        return {}
+
+    province_name = ""
+    province_adcode = ""
+    for name, adcode, prepared, _ in national:
+        if prepared.contains(point):
+            province_name = name
+            province_adcode = adcode
+            break
+
+    if not province_name:
+        min_dist = float("inf")
+        for name, adcode, _, geom in national:
+            d = geom.distance(point)
+            if d < min_dist:
+                min_dist = d
+                province_name = name
+                province_adcode = adcode
+        if min_dist > 1.0:
+            return {}
+
+    _MUNICIPALITIES = {"110000", "120000", "310000", "500000"}
+    if province_adcode in _MUNICIPALITIES:
+        return {"province": province_name, "city": province_name}
+
+    city_name = province_name
+    city_polygons = _load_province_polygons(province_adcode)
+    for name, prepared in city_polygons:
+        if prepared.contains(point):
+            city_name = name
+            break
+
+    return {"province": province_name, "city": city_name}
+
+
+# ---------------------------------------------------------------------------
+# Unified interface
+# ---------------------------------------------------------------------------
+
+def geocode_station(lat: float, lng: float) -> dict:
+    """Geocode a station coordinate. Returns {"province": "...", "city": "..."}.
+
+    Tries Amap API first; falls back to offline PiP when quota is exhausted.
     """
-    highway_name_keywords = ["高速", "服务区", "收费站", "枢纽"]
-    highway_road_types = ["高速", "快速路", "国道"]
+    result = _amap_geocode(lat, lng)
+    if result:
+        return result
 
-    # Check station name
-    for kw in highway_name_keywords:
-        if kw in station_name:
-            return "高速站"
-
-    if "站中站" in station_name:
-        return "站中站"
-
-    # Check road type from geocoding
-    road_type = geocode_result.get("road_type", "")
-    road_name = geocode_result.get("road_name", "")
-    road_distance = geocode_result.get("road_distance", 9999)
-
-    # Only consider nearby roads (within 200m)
-    if road_distance < 200:
-        for rt in highway_road_types:
-            if rt in road_type or rt in road_name:
-                return "高速站"
-
-    return "市区站"
+    return _pip_geocode(lat, lng)
 
 
-def geocode_all_stations(db_path: str = "data/stations.db", delay: float = 0.1):
-    """Geocode all un-geocoded stations in the database.
+def geocode_pending_stations(conn, delay: float = 0.1):
+    """Geocode all stations where geocoded=0. Database acts as cache.
 
-    Amap free tier: 5000 requests/day. We do ~0.1s delay between calls.
+    Already-geocoded stations are skipped. Can be interrupted and resumed.
     """
-    if not AMAP_API_KEY:
-        log.error("AMAP_API_KEY not set! Set environment variable or update config.")
-        return
-
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-
-    # Get un-geocoded stations
     stations = conn.execute(
-        "SELECT id, station_name, lat, lng FROM stations WHERE geocoded = 0"
+        "SELECT id, lat, lng FROM stations WHERE geocoded = 0"
     ).fetchall()
 
-    log.info(f"Geocoding {len(stations)} stations...")
+    if not stations:
+        log.info("All stations already geocoded.")
+        return 0
+
+    backend = "Amap API" if (AMAP_API_KEY and not _amap_exhausted) else "offline PiP"
+    log.info(f"Geocoding {len(stations)} pending stations (starting with {backend})...")
 
     success = 0
     for i, s in enumerate(stations):
-        result = reverse_geocode(s["lat"], s["lng"])
+        result = geocode_station(s["lat"], s["lng"])
         if not result:
             time.sleep(delay)
             continue
 
-        station_type = classify_station_type(result, s["station_name"])
-
         conn.execute("""
-            UPDATE stations SET
-                province = ?,
-                city = ?,
-                district = ?,
-                nearby_road = ?,
-                road_type = ?,
-                station_type = ?,
-                geocoded = 1
+            UPDATE stations SET province = ?, city = ?, geocoded = 1
             WHERE id = ?
-        """, (
-            result.get("province", ""),
-            result.get("city", ""),
-            result.get("district", ""),
-            result.get("road_name", ""),
-            result.get("road_type", ""),
-            station_type,
-            s["id"],
-        ))
+        """, (result.get("province", ""), result.get("city", ""), s["id"]))
 
         success += 1
-        if (i + 1) % 100 == 0:
-            conn.commit()
-            log.info(f"Geocoded {i+1}/{len(stations)}, {success} success")
 
-        time.sleep(delay)
+        if (i + 1) % 50 == 0:
+            conn.commit()
+            backend = "PiP" if _amap_exhausted else "API"
+            log.info(f"  Geocoded {i+1}/{len(stations)} ({success} ok, via {backend})")
+
+        if not _amap_exhausted:
+            time.sleep(delay)
 
     conn.commit()
-    conn.close()
     log.info(f"Geocoding done: {success}/{len(stations)} successful")
+    return success
 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
     if not AMAP_API_KEY:
-        print("请设置高德地图 API Key:")
-        print("  export AMAP_API_KEY=your_key_here")
-        print("  python geocoder.py")
+        print("高德 API Key 未设置，将使用离线 PiP 模式")
+        print("如需使用高德 API: export AMAP_API_KEY=your_key_here")
     else:
-        geocode_all_stations()
+        print(f"使用高德 API (Key: {AMAP_API_KEY[:8]}...)")
+
+    from database import get_db
+    conn = get_db()
+    try:
+        geocode_pending_stations(conn)
+    finally:
+        conn.close()

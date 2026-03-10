@@ -28,37 +28,20 @@ REQUEST_TEMPLATE = {
 # Concurrent workers for parallel API requests
 CONCURRENT_WORKERS = 10
 
-# Grid scan points covering populated China
-# ~110km spacing, with population boundary filter
-# Only scans areas likely to have stations (east of Hu Line + western corridors)
+# Grid scan points covering all of China
+# ~80km spacing, API search radius 50km → adjacent points overlap ~20km, no blind spots
 SCAN_GRID = []
 
-lat_start, lat_end = 20.0, 50.0
-lng_start, lng_end = 97.0, 135.5
+lat_start, lat_end = 18.0, 54.0
+lng_start, lng_end = 73.0, 135.5
 lat_step = 0.72
 lng_step = 0.90
-
-
-def _in_populated_area(lat, lng):
-    """Filter grid points to populated regions of China."""
-    # Eastern China: lng >= 105 — densely populated, scan all
-    if lng >= 105:
-        return True
-    # Southwest corridor (Yunnan, Guizhou, Sichuan, Chongqing): 97-105E, 20-35N
-    if 97 <= lng < 105 and 20 <= lat <= 35:
-        return True
-    # Hexi corridor + Ningxia (Lanzhou → Urumqi belt): 100-108E, 35-42N
-    if 100 <= lng < 108 and 35 < lat <= 42:
-        return True
-    return False
-
 
 lat = lat_start
 while lat <= lat_end:
     lng = lng_start
     while lng <= lng_end:
-        if _in_populated_area(lat, lng):
-            SCAN_GRID.append((round(lat, 4), round(lng, 4)))
+        SCAN_GRID.append((round(lat, 4), round(lng, 4)))
         lng += lng_step
     lat += lat_step
 
