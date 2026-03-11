@@ -23,7 +23,6 @@ def init_db():
             address TEXT,
             city TEXT,
             province TEXT,
-            geocoded INTEGER DEFAULT 0,
             lat REAL,
             lng REAL,
             operator_name TEXT,
@@ -37,6 +36,7 @@ def init_db():
             byd_self_support INTEGER DEFAULT 0,
             service_tags TEXT,
             attribute_tags TEXT,
+            geocoded INTEGER DEFAULT 0,
             first_seen DATE,
             last_seen DATE
         );
@@ -84,7 +84,11 @@ def init_db():
 
 
 def upsert_station(conn, station: dict, today: str):
-    """Insert or update a station record. City/province set by geocoder later."""
+    """Insert or update a station record.
+
+    Province/city are filled later by geocode_pending_stations (geocoder.py).
+    New stations get geocoded=0 so the geocoder picks them up.
+    """
     existing = conn.execute("SELECT first_seen FROM stations WHERE id = ?", (station["id"],)).fetchone()
     first_seen = existing["first_seen"] if existing else today
 

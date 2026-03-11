@@ -39,7 +39,7 @@ TIER2_CITIES = {
 _8DIR = [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)]
 
 
-def fetch_stations(lat: float, lng: float) -> list:
+def fetch_stations(lat: float, lng: float, max_retries: int = 5) -> list:
     """Fetch stations near a given coordinate with retry on transient errors."""
     req_data = REQUEST_TEMPLATE.copy()
     req_data["lat"] = lat
@@ -48,7 +48,6 @@ def fetch_stations(lat: float, lng: float) -> list:
 
     payload = {"request": json.dumps(req_data)}
 
-    max_retries = 5
     for attempt in range(max_retries):
         try:
             resp = requests.post(API_URL, json=payload, headers=REQUEST_HEADERS, timeout=15)

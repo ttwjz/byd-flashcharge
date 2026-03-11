@@ -1,19 +1,16 @@
-"""Download province-level GeoJSON files from DataV for map drill-down.
-
-Downloads 34 province/municipality/region GeoJSON files to public/static/maps/
-and generates province_map.json index.
-"""
+"""Download province GeoJSON files from DataV GeoAtlas for map drill-down + PiP geocoding."""
 
 import json
 import os
-import requests
 import time
+import requests
 
-# DataV Aliyun GeoJSON API
-DATAV_BASE = "https://geo.datav.aliyun.com/areas_v3/bound"
+MAPS_DIR = os.path.join("public", "static", "maps")
+BASE_URL = "https://geo.datav.aliyun.com/areas_v3/bound"
 
-# Province adcode → name mapping (all 34 provinces)
+# adcode -> province name (ECharts china.js uses these names)
 PROVINCES = {
+    "100000": "全国",
     "110000": "北京",
     "120000": "天津",
     "130000": "河北",
@@ -50,52 +47,46 @@ PROVINCES = {
     "820000": "澳门",
 }
 
-OUTPUT_DIR = os.path.join("public", "static", "maps")
 
+def download_all():
+    os.makedirs(MAPS_DIR, exist_ok=True)
 
-def download_province(adcode: str, name: str) -> bool:
-    """Download a province GeoJSON with city-level boundaries (full)."""
-    url = f"{DATAV_BASE}/{adcode}_full.json"
-    try:
-        resp = requests.get(url, timeout=15)
-        resp.raise_for_status()
-        data = resp.json()
-
-        filename = f"{adcode}.json"
-        path = os.path.join(OUTPUT_DIR, filename)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
-
-        features = len(data.get("features", []))
-        size = os.path.getsize(path)
-        print(f"  {name} ({adcode}): {features} cities, {size:,} bytes")
-        return True
-    except Exception as e:
-        print(f"  {name} ({adcode}): FAILED - {e}")
-        return False
-
-
-def main():
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-    print(f"Downloading {len(PROVINCES)} province GeoJSON files to {OUTPUT_DIR}/")
-
-    province_map = {}
-    success = 0
+    # Also write the province name -> adcode mapping as JSON for frontend use
+    name_to_adcode = {name: code for code, name in PROVINCES.items() if code != "100000"}
 
     for adcode, name in PROVINCES.items():
-        if download_province(adcode, name):
-            province_map[name] = f"{adcode}.json"
-            success += 1
-        time.sleep(0.2)
+        filename = f"{adcode}_full.json"
+        filepath = os.path.join(MAPS_DIR, filename)
 
-    # Write province_map.json index
-    index_path = os.path.join(OUTPUT_DIR, "province_map.json")
-    with open(index_path, "w", encoding="utf-8") as f:
-        json.dump(province_map, f, ensure_ascii=False, indent=2)
+        if os.path.exists(filepath):
+            print(f"  Skip {name} ({adcode}) - already exists")
+            continue
 
-    print(f"\nDone: {success}/{len(PROVINCES)} provinces downloaded")
-    print(f"Index: {index_path}")
+        url = f"{BASE_URL}/{filename}"
+        print(f"  Downloading {name} ({adcode})...", end=" ", flush=True)
+
+        try:
+            resp = requests.get(url, timeout=30)
+            resp.raise_for_status()
+            data = resp.json()
+
+            with open(filepath, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
+
+            size_kb = os.path.getsize(filepath) / 1024
+            print(f"OK ({size_kb:.0f} KB)")
+        except Exception as e:
+            print(f"FAILED: {e}")
+
+        time.sleep(0.3)
+
+    # Write mapping file
+    mapping_path = os.path.join(MAPS_DIR, "province_map.json")
+    with open(mapping_path, "w", encoding="utf-8") as f:
+        json.dump(name_to_adcode, f, ensure_ascii=False, indent=2)
+    print(f"\nProvince mapping written to {mapping_path}")
+    print("Done!")
 
 
 if __name__ == "__main__":
-    main()
+    download_all()
