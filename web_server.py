@@ -2,9 +2,11 @@
 
 from flask import Flask, render_template, jsonify
 from database import get_db, get_city_stats, get_summary_history
-from datetime import date
+from config import DB_PATH
+from datetime import date, datetime
+import os
 
-app = Flask(__name__)
+app = Flask(__name__, template_folder="public", static_folder="public/static")
 
 
 @app.route("/")
@@ -12,7 +14,7 @@ def index():
     return render_template("index.html")
 
 
-@app.route("/api/summary")
+@app.route("/api/summary.json")
 def api_summary():
     """Current day summary + recent history."""
     conn = get_db()
@@ -42,6 +44,7 @@ def api_summary():
 
         return jsonify({
             "latest": dict(latest) if latest else None,
+            "last_updated": datetime.fromtimestamp(os.path.getmtime(DB_PATH)).strftime("%Y-%m-%d %H:%M"),
             "history": [dict(h) for h in history],
             "type_breakdown": [dict(t) for t in type_stats],
         })
@@ -49,7 +52,7 @@ def api_summary():
         conn.close()
 
 
-@app.route("/api/cities")
+@app.route("/api/cities.json")
 def api_cities():
     """City-level statistics."""
     conn = get_db()
@@ -64,7 +67,7 @@ def api_cities():
         conn.close()
 
 
-@app.route("/api/stations")
+@app.route("/api/stations.json")
 def api_stations():
     """All station details."""
     conn = get_db()
@@ -82,7 +85,7 @@ def api_stations():
         conn.close()
 
 
-@app.route("/api/growth")
+@app.route("/api/growth.json")
 def api_growth():
     """Daily growth data for charts."""
     conn = get_db()

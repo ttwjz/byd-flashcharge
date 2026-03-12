@@ -161,8 +161,6 @@
         <div class="header-sub">实时监控全国闪充站部署进度</div>
         <div class="clock-bar">
             <div class="dot"></div>
-            <span id="liveClock">--</span>
-            <span>·</span>
             <span id="updateTime">加载中...</span>
         </div>
     </div>
@@ -219,13 +217,6 @@
 <script>
 let cityData=[], allStations=[], currentType='all', sortCol='station_count', sortDir='desc';
 
-// Clock
-function tick(){
-    const d=new Date();
-    document.getElementById('liveClock').textContent=d.toLocaleString('zh-CN',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
-}
-setInterval(tick,1000);tick();
-
 // CountUp
 function countUp(el,target,dur){
     dur=dur||1200;const t0=performance.now();
@@ -251,7 +242,7 @@ async function loadData(){
         renderCityTable(cities);
         renderTrend(growth);
         renderMap();
-        if(summary.latest) document.getElementById('updateTime').textContent='数据更新于 '+summary.latest.snapshot_date;
+        if(summary.last_updated) document.getElementById('updateTime').textContent='数据更新于 '+summary.last_updated;
     }catch(e){
         console.error(e);
         document.getElementById('cardsTop').innerHTML='<div class="loading">数据加载失败</div>';
@@ -514,7 +505,7 @@ function renderTrend(growth){
                 tooltip:{backgroundColor:'#1e293b',borderColor:'rgba(56,189,248,.3)',borderWidth:1,titleColor:'#f1f5f9',bodyColor:'#94a3b8',padding:12,cornerRadius:8}},
             scales:sc}});
     new Chart(document.getElementById('growthChart'),{type:'bar',
-        data:{labels,datasets:[{label:'新增站点',data:growth.map(g=>g.new_stations_today),
+        data:{labels,datasets:[{label:'新增站点',data:growth.map((g,i)=>i===0?0:g.new_stations_today),
             backgroundColor:'rgba(52,211,153,.7)',hoverBackgroundColor:'#34d399',borderRadius:4,borderSkipped:false}]},
         options:{responsive:true,interaction:{intersect:false,mode:'index'},
             plugins:{legend:{labels:{color:'#94a3b8',font:{size:12},usePointStyle:true,pointStyle:'circle'}},
