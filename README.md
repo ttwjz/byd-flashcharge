@@ -1,116 +1,107 @@
-# BYD Flash Charge Station Tracker ⚡
+# BYD Flash Charge Station Tracker
 
-每日追踪比亚迪全国闪充站部署进度，自动采集、地理编码、可视化。
+> **声明：本项目为迪粉个人兴趣统计，非官方项目，与比亚迪公司无关。数据通过公开接口采集，难免存在遗漏或误差，仅供参考。**
 
-## 功能特性
+追踪比亚迪全国闪充站部署进度，自动采集、地理编码、可视化展示。
 
-- **全国扫描** — 289 城市中心 + 1424 偏移点 + 3570 网格点，覆盖全部中国领土
-- **自动重试** — SSL/连接/超时错误自动重试 3 次（指数退避），零失败率
-- **双模式地理编码** — 高德 API 优先，额度耗尽自动切换离线 PiP（shapely + GeoJSON）
-- **数据库缓存** — 已编码站点不会重复请求，支持中断恢复
-- **三级地图下钻** — 全国 → 省 → 市，点击放大，逐级查看站点分布
-- **暗色仪表盘** — 站点总数、覆盖城市、增长趋势、城市排行
-- **双部署模式** — Flask 本地开发 / Cloudflare Pages 静态部署
+目前已收录 **2500+** 闪充站，覆盖 **31** 省 **273** 城市。
+
+## 工作原理
+
+1. **扫描** — 基于全国 3200+ 区县质心 + 城市补充中点 + 高速公路采样点，调用 BYD 充电地图 API 获取站点数据
+2. **去重入库** — 按站点 ID 去重，upsert 写入 SQLite，多次扫描自动累积
+3. **地理编码** — 离线 Point-in-Polygon（shapely + 省级 GeoJSON）确定站点所属省/市
+4. **导出部署** — 导出静态 JSON，通过 Cloudflare Pages 部署前端
+
+## 扫描策略
+
+采用三层扫描点覆盖全国：
+
+| 层级 | 来源 | 数量 | 作用 |
+|------|------|------|------|
+| 区县质心 | 高德行政区划 API | ~3200 | 基础城市覆盖 |
+| 城市补充中点 | 密集城市相邻区间 | ~980 | 防止大城市 API 截断 |
+| 高速采样点 | 26 条国家高速每 80km | ~90 | 捕获服务区站点 |
+
+## 数据面板
+
+- 站点总数、闪充桩总数、覆盖城市数、今日新增
+- 全国站点散点地图（三级下钻：全国 → 省 → 市）
+- 站点增长趋势 + 每日新增柱状图
+- 城市站点排行（可搜索、可排序）
 
 ## 安装
 
 ```bash
+conda create -n byd-flashcharge python=3.13
+conda activate byd-flashcharge
 pip install requests flask shapely
 ```
 
-地理编码需要高德 API Key（免费申请，5000 次/天）：
+复制配置文件并填入高德 API Key（免费申请，5000 次/天）：
+
 ```bash
-export AMAP_API_KEY=your_key_here
+cp config.example.py config.py
+# 编辑 config.py，填入你的 AMAP_API_KEY
 ```
 
 ## 使用
 
-### 1. 下载省级地图数据（首次）
+### 生成扫描点（首次）
+
 ```bash
-python download_maps.py
+python scan_points.py
 ```
 
-### 2. 抓取数据 + 地理编码
+从高德 API 获取全国区县质心并生成扫描坐标，缓存到 `data/scan_points.json`。
+
+### 抓取数据
+
 ```bash
 python scraper.py
 ```
-扫描全国约 25-35 分钟（含重试），地理编码约 4 分钟。
 
-### 3. 启动网页
+全量扫描约 2-3 分钟（50 并发），自动入库 + 地理编码。
+
+### 启动网页
+
 ```bash
 python web_server.py
 ```
+
 打开 http://localhost:5000 查看数据面板。
 
-### 4. 每日定时抓取（可选）
+### 自动化部署（可选）
+
 ```bash
-# Linux crontab: 每天凌晨 3 点执行
-0 3 * * * cd /path/to/byd-flashcharge && bash deploy.sh
+# crontab: 每天凌晨 3 点执行，仅在有新增站点时提交
+0 3 * * * /path/to/byd-flashcharge/deploy.sh
 ```
 
-## 架构
-
-```
-数据采集                    地理编码                    可视化
-┌──────────┐    ┌───────────────────────┐    ┌──────────────┐
-│ BYD API  │───→│ 高德 API (主)         │───→│ Flask / 静态 │
-│ 289 城市 │    │ 离线 PiP (备)         │    │ ECharts 地图 │
-│ 3570 网格│    │ shapely + GeoJSON     │    │ Chart.js 图表│
-└──────────┘    └───────────────────────┘    └──────────────┘
-     ↓                    ↓                        ↑
-   SQLite ─────── province / city ──────── JSON API
-```
-
-## 文件说明
+## 项目结构
 
 ```
 byd-flashcharge/
-├── config.py              # API 配置、全国网格点生成
-├── scraper.py             # 数据抓取（三阶段扫描 + 自动重试）
-├── geocoder.py            # 双模式地理编码（高德 API + 离线 PiP）
-├── database.py            # SQLite 数据库（stations/snapshots/summary）
-├── cities.py              # 289 个城市坐标 + 城市名/区县映射表
+├── config.example.py      # 配置模板（不含密钥）
+├── config.py              # 实际配置（git 忽略）
+├── scraper.py             # 数据抓取（并发扫描 + 自动重试）
+├── scan_points.py         # 扫描点生成（区县质心 + 中点 + 高速）
+├── geocoder.py            # 地理编码（离线 PiP + 高德 API 备用）
+├── database.py            # SQLite 数据库操作
+├── export_json.py         # 导出静态 JSON
 ├── web_server.py          # Flask Web 服务
-├── export_json.py         # 导出静态 JSON（Cloudflare Pages 部署用）
-├── download_maps.py       # 下载 34 省 GeoJSON（地图下钻 + PiP 共用）
-├── deploy.sh              # 自动化部署脚本（抓取→导出→git push）
-├── templates/
-│   └── index.html         # Flask 版前端
+├── deploy.sh              # 自动化部署脚本
+├── download_maps.py       # 下载省级 GeoJSON
 ├── public/                # Cloudflare Pages 静态站
-│   ├── index.html         # 静态版前端
-│   ├── api/*.json         # 导出的 JSON 数据
-│   └── static/maps/       # 省级 GeoJSON（34 省 + 全国）
-├── static/                # Flask 静态资源
-│   ├── echarts.min.js     # ECharts 5.6.1
-│   ├── chart.js           # Chart.js
-│   ├── china.js           # 中国地图 GeoJSON
-│   └── maps -> ../public/static/maps/  # 符号链接
-└── data/                  # 运行时数据（自动创建）
+│   ├── index.html
+│   └── api/*.json         # 导出的站点数据
+├── templates/             # Flask 模板
+└── data/                  # 运行时数据（git 忽略）
     ├── stations.db        # SQLite 数据库
-    ├── raw_YYYY-MM-DD.json
-    └── scraper.log
+    ├── scan_points.json   # 扫描点缓存
+    └── scraper.log        # 运行日志
 ```
 
-## 数据面板
+## License
 
-- 📊 站点总数、闪充桩总数、覆盖城市数、今日新增
-- 🗺️ 全国站点散点地图（支持三级下钻：全国→省→市）
-- 📈 站点增长趋势 + 每日新增柱状图
-- 🏙️ 城市站点排行（可搜索、可排序）
-
-## 本次改动（dev 分支）
-
-### 新增功能
-- **双模式地理编码**：高德 API 为主，离线 PiP 为后备，站点 100% 归属到省/市
-- **三级地图下钻**：点击省份进入省级视图，点击城市进入市级视图，显示区县边界
-- **请求重试机制**：SSL/连接/超时错误自动重试 3 次，指数退避，消除瞬态错误
-- **全国网格覆盖**：从 1667 点扩展到 3570 点，覆盖新疆、西藏、内蒙古全境
-
-### 修复
-- 修复 stations 表缺少 `city` 列导致的崩溃
-- 修复 `data/` 目录不存在时日志初始化失败
-- 站点省/市判断从不可靠的名称解析改为坐标地理编码
-
-### 数据库变更
-- stations 表新增 `province TEXT`、`geocoded INTEGER DEFAULT 0` 列
-- 地理编码结果作为缓存持久化，重复运行不会重新请求
+MIT

@@ -1,6 +1,7 @@
 data/*
 !data/scan_points.json
 __pycache__/
+config.py
 .omc
 .history
 static/maps

@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -eo pipefail
 
 # Resolve project directory (works from cron and manual invocation)
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -14,16 +14,40 @@ mkdir -p data
 
 echo "=== $(date '+%Y-%m-%d %H:%M:%S') BYD 闪充站数据更新 ===" | tee -a "$LOG"
 
-echo "[1/3] 爬取最新数据..." | tee -a "$LOG"
-python scraper.py 2>&1 | tail -5 | tee -a "$LOG"
+# Record station count before scan
+BEFORE=$(python -c "
+import sqlite3, os
+db = 'data/stations.db'
+if not os.path.exists(db): print(0); exit()
+c = sqlite3.connect(db).cursor()
+print(c.execute('SELECT COUNT(*) FROM stations').fetchone()[0])
+")
 
-echo "[2/3] 导出静态 JSON..." | tee -a "$LOG"
+echo "[1/2] 爬取最新数据..." | tee -a "$LOG"
+python scraper.py 2>&1 | tail -5 | tee -a "$LOG"
+if [ "${PIPESTATUS[0]}" -ne 0 ]; then
+    echo "ERROR: scraper.py failed, aborting." | tee -a "$LOG"
+    exit 1
+fi
+
+# Check station count after scan
+AFTER=$(python -c "
+import sqlite3
+c = sqlite3.connect('data/stations.db').cursor()
+print(c.execute('SELECT COUNT(*) FROM stations').fetchone()[0])
+")
+NEW=$((AFTER - BEFORE))
+
+if [ "$NEW" -le 0 ]; then
+    echo "No new stations ($BEFORE → $AFTER), skip deploy." | tee -a "$LOG"
+    exit 0
+fi
+
+echo "[2/2] +${NEW} new stations ($BEFORE → $AFTER), exporting & pushing..." | tee -a "$LOG"
 python export_json.py 2>&1 | tee -a "$LOG"
 
-echo "[3/3] 提交并推送..." | tee -a "$LOG"
 git add public/api/
-git diff --cached --quiet && echo "No changes to commit." | tee -a "$LOG" && exit 0
-git commit -m "data: update $(date +%Y-%m-%d_%H:%M)" | tee -a "$LOG"
+git commit -m "data: update $(date +%Y-%m-%d) — ${NEW} new stations (total ${AFTER})" | tee -a "$LOG"
 git push 2>&1 | tee -a "$LOG"
 
 echo "=== $(date '+%Y-%m-%d %H:%M:%S') 部署完成! ===" | tee -a "$LOG"

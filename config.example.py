@@ -23,10 +23,10 @@ REQUEST_TEMPLATE = {
 }
 
 # Concurrent workers for parallel API requests
-CONCURRENT_WORKERS = 30
+CONCURRENT_WORKERS = 50
 
-# Amap (高德地图)
-AMAP_API_KEY = "eec97f01beba5127aaf51661d72b92d3"
+# Amap (高德地图) — 免费申请: https://console.amap.com/
+AMAP_API_KEY = "your_amap_api_key_here"
 
 # Database
 DB_PATH = "data/stations.db"
