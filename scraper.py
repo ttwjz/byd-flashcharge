@@ -14,7 +14,7 @@ import requests
 import logging
 from datetime import date
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from config import API_URL, REQUEST_HEADERS, REQUEST_TEMPLATE, CONCURRENT_WORKERS, generate_imei_md5
+from config import API_URL, REQUEST_HEADERS, REQUEST_TEMPLATE, CONCURRENT_WORKERS, generate_imei_md5, generate_request_id
 from database import init_db, get_db, upsert_station, insert_daily_snapshot, update_daily_summary
 from geocoder import geocode_pending_stations
 from scan_points import load_scan_points
@@ -96,7 +96,8 @@ def fetch_stations(lat: float, lng: float, imei: str, max_retries: int = 5) -> l
         payload = {"request": json.dumps(req_data)}
 
         try:
-            resp = requests.post(API_URL, json=payload, headers=REQUEST_HEADERS, timeout=15)
+            headers = {**REQUEST_HEADERS, "x-request-id": generate_request_id()}
+            resp = requests.post(API_URL, json=payload, headers=headers, timeout=15)
             resp.raise_for_status()
             data = resp.json()
 
@@ -160,7 +161,8 @@ def _probe_api(coords, tries=3):
         req_data["reqTimestamp"] = int(time.time() * 1000)
         payload = {"request": json.dumps(req_data)}
         try:
-            resp = requests.post(API_URL, json=payload, headers=REQUEST_HEADERS, timeout=15)
+            headers = {**REQUEST_HEADERS, "x-request-id": generate_request_id()}
+            resp = requests.post(API_URL, json=payload, headers=headers, timeout=15)
             inner = json.loads(resp.json().get("response", "{}"))
             if inner.get("code") == "0":
                 return True
