@@ -2,8 +2,9 @@
 
 import json
 import os
-from datetime import date
+from datetime import date, datetime
 from database import get_db, get_city_stats, get_summary_history
+from config import DB_PATH
 
 OUTPUT_DIR = os.path.join("public", "api")
 
@@ -35,6 +36,7 @@ def export_summary(conn, today):
 
     return {
         "latest": dict(latest) if latest else None,
+        "last_updated": datetime.fromtimestamp(os.path.getmtime(DB_PATH)).strftime("%Y-%m-%d %H:%M"),
         "history": [dict(h) for h in history],
         "type_breakdown": [dict(t) for t in type_stats],
     }
