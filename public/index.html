@@ -425,12 +425,12 @@ function showChinaMap(){
                 if(p.seriesType==='map') return '<b>'+p.name+'</b><br/>闪充站 '+(p.value||0)+' 座<br/><span style="color:#94a3b8;font-size:12px">点击查看详情</span>';
                 return p.name||'';
             }},
-        geo:{map:'china',roam:true,zoom:1.2,
+        geo:{map:'china',roam:true,zoom:1.2,selectedMode:false,
             scaleLimit:{min:1,max:20},
             itemStyle:{areaColor:'#111827',borderColor:'#1e3a5f',borderWidth:1},
             emphasis:{itemStyle:{areaColor:'#1a2744'},label:{show:true,color:'#fff',fontSize:10}}},
         series:[{
-            type:'map',geoIndex:0,data:provData,tooltip:{show:true}
+            type:'map',geoIndex:0,data:provData,tooltip:{show:true},selectedMode:false
         },{
             type:'scatter',coordinateSystem:'geo',
             data:points, symbolSize:2,
@@ -486,12 +486,12 @@ async function drillToProvince(provName){
                 if(p.seriesType==='map') return '<b>'+p.name+'</b><br/>闪充站 '+(p.value||0)+' 座';
                 return p.name||'';
             }},
-        geo:{map:cached.name,roam:true,zoom:1.0,
+        geo:{map:cached.name,roam:true,zoom:1.0,selectedMode:false,
             scaleLimit:{min:0.5,max:20},
             itemStyle:{areaColor:'#111827',borderColor:'#1e3a5f',borderWidth:1},
             emphasis:{itemStyle:{areaColor:'#1a2744'},label:{show:true,color:'#fff',fontSize:10}}},
         series:[{
-            type:'map',geoIndex:0,data:cityData2,tooltip:{show:true}
+            type:'map',geoIndex:0,data:cityData2,tooltip:{show:true},selectedMode:false
         },{
             type:'scatter',coordinateSystem:'geo',
             data:points, symbolSize:3,
@@ -540,12 +540,13 @@ function drillToCity(province, cityName){
     mapChart.setOption({
         tooltip:{trigger:'item',backgroundColor:'#1e293b',borderColor:'rgba(56,189,248,.3)',borderWidth:1,textStyle:{color:'#f1f5f9'},
             formatter:function(p){if(p.seriesType==='scatter') return scatterTip(p); return p.name||'';}},
-        geo:{map:mapName,roam:true,center:[cLng,cLat],zoom:zoom,
+        geo:{map:mapName,roam:true,center:[cLng,cLat],zoom:zoom,selectedMode:false,
             scaleLimit:{min:1,max:50},
+            regions:[{name:cityName,itemStyle:{areaColor:'rgba(56,189,248,.08)',borderColor:'rgba(56,189,248,.5)',borderWidth:2}}],
             itemStyle:{areaColor:'#111827',borderColor:'#1e3a5f',borderWidth:1},
             emphasis:{itemStyle:{areaColor:'#1a2744'},label:{show:false}}},
         series:[{
-            type:'map',geoIndex:0,data:[],tooltip:{show:false}
+            type:'map',geoIndex:0,data:[],tooltip:{show:false},selectedMode:false
         },{
             type:'scatter',coordinateSystem:'geo',
             data:points,
