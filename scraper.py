@@ -8,6 +8,7 @@ import json
 import os
 import time
 import ssl
+import random
 import threading
 import requests
 import logging
@@ -82,13 +83,13 @@ class GlobalBackoff:
 _backoff = GlobalBackoff()
 
 
-def fetch_stations(lat: float, lng: float, max_retries: int = 5) -> list:
+def fetch_stations(lat: float, lng: float, imei: str, max_retries: int = 5) -> list:
     """Fetch stations near a given coordinate with retry on transient errors."""
     for attempt in range(max_retries):
         _backoff.wait_if_needed()
 
         req_data = REQUEST_TEMPLATE.copy()
-        req_data["imeiMD5"] = generate_imei_md5()
+        req_data["imeiMD5"] = imei
         req_data["lat"] = lat
         req_data["lng"] = lng
         req_data["reqTimestamp"] = int(time.time() * 1000)
@@ -133,27 +134,76 @@ def fetch_stations(lat: float, lng: float, max_retries: int = 5) -> list:
     return []
 
 
+def _worker_task(coord_list, imei):
+    """Worker: process a list of coords sequentially with random delays."""
+    results = {}
+    for lat, lng in coord_list:
+        stations = fetch_stations(lat, lng, imei)
+        for s in stations:
+            results[s["id"]] = s
+        time.sleep(random.uniform(0.5, 2.0))
+    return results
+
+
+def _probe_api(coords, tries=3):
+    """Send a few probe requests to check if our IP is rate-limited.
+
+    Returns True if the API is reachable, False if blocked.
+    """
+    imei = generate_imei_md5()
+    sample = random.sample(coords, min(tries, len(coords)))
+    for lat, lng in sample:
+        req_data = REQUEST_TEMPLATE.copy()
+        req_data["imeiMD5"] = imei
+        req_data["lat"] = lat
+        req_data["lng"] = lng
+        req_data["reqTimestamp"] = int(time.time() * 1000)
+        payload = {"request": json.dumps(req_data)}
+        try:
+            resp = requests.post(API_URL, json=payload, headers=REQUEST_HEADERS, timeout=15)
+            inner = json.loads(resp.json().get("response", "{}"))
+            if inner.get("code") == "0":
+                return True
+        except Exception:
+            pass
+        time.sleep(1)
+    return False
+
+
 def batch_fetch(coords, label=""):
-    """Fetch stations for a list of coordinates concurrently. Returns {id: station}."""
+    """Fetch stations using workers that each simulate an app user."""
     global _backoff
     _backoff = GlobalBackoff()
+
+    # Shuffle to avoid systematic geographic patterns
+    coords = list(coords)
+    random.shuffle(coords)
+
+    # Pre-flight: detect IP-level rate limiting before wasting time
+    if not _probe_api(coords):
+        log.error("IP is rate-limited (API returned '网络繁忙' on all probe requests). "
+                  "Aborting. Try again later or switch to a different IP.")
+        return {}
+
+    # Split coords evenly across workers
+    n = CONCURRENT_WORKERS
+    chunks = [coords[i::n] for i in range(n)]
+    # One fixed imeiMD5 per worker for the entire run
+    worker_imeis = [generate_imei_md5() for _ in range(n)]
 
     results = {}
     total = len(coords)
 
-    with ThreadPoolExecutor(max_workers=CONCURRENT_WORKERS) as executor:
-        future_to_coord = {
-            executor.submit(fetch_stations, lat, lng): (lat, lng)
-            for lat, lng in coords
+    with ThreadPoolExecutor(max_workers=n) as executor:
+        futures = {
+            executor.submit(_worker_task, chunks[i], worker_imeis[i]): i
+            for i in range(n)
         }
-        done = 0
-        for future in as_completed(future_to_coord):
-            done += 1
-            stations = future.result()
-            for s in stations:
-                results[s["id"]] = s
-            if done % 200 == 0 and label:
-                log.info(f"  {label}: {done}/{total} done, {len(results)} unique so far")
+        for future in as_completed(futures):
+            chunk_results = future.result()
+            results.update(chunk_results)
+            if label:
+                log.info(f"  {label}: worker done, {len(results)} unique so far (total points: {total})")
 
     log.info(f"  {label} errors: {_backoff.summary()}")
     return results
